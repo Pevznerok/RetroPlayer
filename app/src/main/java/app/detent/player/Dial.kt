@@ -5,7 +5,6 @@ import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -23,8 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -41,6 +38,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 private const val DetentDegrees = 15f
+private const val NotchDegrees = DetentDegrees / 2
+private const val TickIntervalMs = 17L
 
 @Composable
 fun Dial(
@@ -55,7 +54,7 @@ fun Dial(
     centerEnabled: Boolean,
     onCenter: () -> Unit,
     onStart: () -> Unit,
-    onStep: (Int) -> Boolean,
+    onStep: (Int) -> Unit,
     onFinish: (Boolean) -> Unit,
     onAccessibleStep: (Int) -> Boolean,
 ) {
@@ -94,6 +93,7 @@ fun Dial(
                     var angle = angleAt(down.position - center)
                     var accumulated = 0f
                     var applied = 0
+                    var lastNotch = 0
                     var lastTick = 0L
                     var canceled = true
                     try {
@@ -113,10 +113,14 @@ fun Dial(
                             val detents = (accumulated / DetentDegrees).toInt()
                             rotation = (turnStart + accumulated) % 360
                             if (detents != applied) {
-                                val changed = step(detents - applied)
+                                step(detents - applied)
                                 applied = detents
+                            }
+                            val notch = (accumulated / NotchDegrees).toInt()
+                            if (notch != lastNotch) {
+                                lastNotch = notch
                                 val now = SystemClock.uptimeMillis()
-                                if (changed && now - lastTick >= 32) {
+                                if (now - lastTick >= TickIntervalMs) {
                                     view.performHapticFeedback(tickEffect)
                                     lastTick = now
                                 }
@@ -140,50 +144,30 @@ fun Dial(
                 )
             }
         ) {
-            val r = size.minDimension * .5f
-            drawCircle(Color(0xFF0A0A0A), r)
-            drawCircle(
-                Brush.verticalGradient(listOf(Color(0xFF686967), Color(0xFF333432), Color(0xFF111211))),
-                r * .978f
-            )
-            drawCircle(Color(0xFF121313), r * .95f, style = Stroke(r * .013f))
-            drawCircle(
-                Brush.radialGradient(
-                    0.0f to Color(0xFF171817), .62f to Color(0xFF242523), .92f to Color(0xFF363735),
-                    1f to Color(0xFF252625), radius = r
-                ),
-                r * .925f
-            )
-            drawCircle(Color(0xFF51524F), r * .885f, style = Stroke(r * .009f))
-            drawCircle(Color(0xFF111211), r * .622f, style = Stroke(r * .016f))
-            for (i in 0 until 72) {
-                val radians = Math.toRadians((i * 5 + rotation - 90).toDouble())
+            val r = size.minDimension * .48f
+            drawCircle(if (enabled) Dim else Line, r, style = Stroke(1.5.dp.toPx()))
+            val notchCount = (360 / NotchDegrees).toInt()
+            for (i in 0 until notchCount) {
+                val radians = Math.toRadians((i * NotchDegrees + rotation - 90).toDouble())
                 val direction = Offset(cos(radians).toFloat(), sin(radians).toFloat())
-                val major = i % 3 == 0
+                val major = i % 2 == 0
                 drawLine(
                     when {
+                        !enabled -> Line
                         i == 0 -> Ink
-                        major -> Color(0xFF999994)
-                        else -> Color(0xFF5F605B)
+                        major -> Muted
+                        else -> Dim
                     },
-                    center + direction * (r * if (major) .715f else .767f),
-                    center + direction * (r * .855f),
-                    strokeWidth = (if (major) 1.3.dp else 0.8.dp).toPx(),
+                    center + direction * (r * if (major) .79f else .875f),
+                    center + direction * (r * .965f),
+                    strokeWidth = (if (major) 1.6.dp else 1.dp).toPx(),
                     cap = StrokeCap.Round
                 )
             }
-            drawLine(
-                if (enabled) Signal else Dim,
-                center.copy(y = r * .069f), center.copy(y = r * .20f),
-                strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round
-            )
-            drawCircle(Color(0xFF0D0D0D), r * .557f)
-            drawCircle(Color(0xFF41423E), r * .545f, style = Stroke(1.dp.toPx()))
         }
         Box(
-            Modifier.size(diameter * .48f).clip(CircleShape)
-                .background(Brush.verticalGradient(listOf(Color(0xFF2D2D2B), Color(0xFF1C1D1B))))
-                .border(1.dp, Line, CircleShape)
+            Modifier.size((diameter * .27f).coerceAtLeast(48.dp)).clip(CircleShape)
+                .background(if (centerEnabled) Signal else Raised)
                 .clickable(enabled = centerEnabled, role = Role.Button) {
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                     onCenter()
@@ -191,7 +175,7 @@ fun Dial(
                 .semantics { contentDescription = centerLabel },
             contentAlignment = Alignment.Center
         ) {
-            Symbol(centerIcon, diameter * .17f, if (centerEnabled) Ink else Dim)
+            Symbol(centerIcon, (diameter * .105f).coerceAtLeast(21.dp), if (centerEnabled) Case else Dim)
         }
     }
 }

@@ -26,9 +26,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.Player
 import java.util.Locale
 
 val Case = Color(0xFF141414)
@@ -42,13 +44,16 @@ val Signal = Color(0xFFFF665D)
 val DotFont = FontFamily(Font(R.font.dot_gothic))
 
 @Composable
-fun DotText(text: String, modifier: Modifier = Modifier, color: Color = Muted, size: Int = 12) {
-    Text(text, modifier, color = color, fontFamily = DotFont, fontSize = size.sp, letterSpacing = 1.sp, lineHeight = (size + 5).sp)
+fun DotText(text: String, modifier: Modifier = Modifier, color: Color = Muted, size: Int = 12, maxLines: Int = Int.MAX_VALUE) {
+    Text(
+        text, modifier, color = color, fontFamily = DotFont, fontSize = size.sp,
+        letterSpacing = 1.sp, lineHeight = (size + 5).sp, maxLines = maxLines, overflow = TextOverflow.Ellipsis
+    )
 }
 
 enum class Glyph {
     Play, Pause, Previous, Next, Record, Library, Queue, Search, More, Back, Add, Repeat,
-    RepeatOne, Shuffle, Close, Refresh
+    RepeatOne, Shuffle, Close, Refresh, PlaylistAdd, Heart, HeartFilled
 }
 
 @Composable
@@ -116,6 +121,25 @@ fun Symbol(glyph: Glyph, size: Dp, color: Color = Ink) {
                 line(5f, 12f, 19f, 12f)
                 line(12f, 5f, 12f, 19f)
             }
+            Glyph.PlaylistAdd -> {
+                line(3f, 6f, 17f, 6f)
+                line(3f, 11f, 12f, 11f)
+                line(3f, 16f, 10f, 16f)
+                line(14f, 16f, 22f, 16f)
+                line(18f, 12f, 18f, 20f)
+            }
+            Glyph.Heart, Glyph.HeartFilled -> {
+                val heart = Path().apply {
+                    moveTo(12f * unit, 20f * unit)
+                    cubicTo(8f * unit, 17f * unit, 3f * unit, 13f * unit, 3f * unit, 9f * unit)
+                    cubicTo(3f * unit, 4f * unit, 9f * unit, 2.5f * unit, 12f * unit, 7f * unit)
+                    cubicTo(15f * unit, 2.5f * unit, 21f * unit, 4f * unit, 21f * unit, 9f * unit)
+                    cubicTo(21f * unit, 13f * unit, 16f * unit, 17f * unit, 12f * unit, 20f * unit)
+                    close()
+                }
+                if (glyph == Glyph.HeartFilled) drawPath(heart, color)
+                else drawPath(heart, color, style = Stroke(width, join = StrokeJoin.Round))
+            }
             Glyph.Repeat, Glyph.RepeatOne -> {
                 chain(3f to 10f, 3f to 6f, 20f to 6f)
                 chain(16f to 2f, 20f to 6f, 16f to 10f)
@@ -143,19 +167,58 @@ fun Symbol(glyph: Glyph, size: Dp, color: Color = Ink) {
 }
 
 @Composable
-fun Key(glyph: Glyph, label: String, enabled: Boolean = true, active: Boolean = false, onClick: () -> Unit) {
+fun Key(
+    glyph: Glyph,
+    label: String,
+    enabled: Boolean = true,
+    active: Boolean = false,
+    modifier: Modifier = Modifier,
+    framed: Boolean = true,
+    onClick: () -> Unit,
+) {
     val view = LocalView.current
     val shape = RoundedCornerShape(9.dp)
     Box(
-        Modifier.size(47.dp).clip(shape).background(Raised).border(1.dp, Line, shape)
+        modifier.size(48.dp).clip(shape)
+            .then(if (framed) Modifier.background(Raised).border(1.dp, Line, shape) else Modifier)
             .clickable(enabled = enabled, role = Role.Button) {
                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                 onClick()
             }.semantics { contentDescription = label },
         contentAlignment = Alignment.Center
     ) {
-        Symbol(glyph, 21.dp, if (!enabled) Dim else if (active) Signal else Ink)
+        val color = when {
+            !enabled -> Dim
+            active -> Signal
+            framed -> Ink
+            else -> Muted
+        }
+        Symbol(glyph, 21.dp, color)
     }
+}
+
+@Composable
+fun PlaybackOrderKeys(
+    player: PlayerViewModel,
+    state: Playback,
+    modifier: Modifier = Modifier,
+    framed: Boolean = true,
+) {
+    Key(
+        Glyph.Shuffle, "Shuffle upcoming tracks", enabled = state.queue.lastIndex - state.index >= 2,
+        modifier = modifier, framed = framed, onClick = player::shuffleUpcoming
+    )
+    val repeatLabel = when (state.repeat) {
+        Player.REPEAT_MODE_ALL -> "Repeat all"
+        Player.REPEAT_MODE_ONE -> "Repeat one"
+        else -> "Repeat off"
+    }
+    Key(
+        if (state.repeat == Player.REPEAT_MODE_ONE) Glyph.RepeatOne else Glyph.Repeat,
+        "$repeatLabel. Change repeat mode", enabled = state.current != null,
+        active = state.repeat != Player.REPEAT_MODE_OFF, modifier = modifier, framed = framed,
+        onClick = player::cycleRepeat
+    )
 }
 
 fun timestamp(ms: Long): String {

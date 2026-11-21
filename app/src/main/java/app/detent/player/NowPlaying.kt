@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -51,7 +52,9 @@ private const val SeekStepMs = 5_000L
 @Composable
 fun NowPlaying(player: PlayerViewModel, state: Playback, openLibrary: () -> Unit) {
     val track = state.current
+    val favorites by player.favorites.collectAsStateWithLifecycle()
     val position by player.position.collectAsStateWithLifecycle()
+    var playlistTrack by remember { mutableStateOf<Track?>(null) }
     var preview by remember(track?.id, state.index) { mutableStateOf<Long?>(null) }
     var seekFrom by remember(track?.id, state.index) { mutableStateOf(0L) }
     val gestureKey = track?.let { state.index to it.id }
@@ -59,15 +62,16 @@ fun NowPlaying(player: PlayerViewModel, state: Playback, openLibrary: () -> Unit
     val shape = RoundedCornerShape(12.dp)
 
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val dialSize = minOf((maxHeight * .275f).coerceIn(150.dp, 194.dp), maxWidth - 118.dp)
-            .coerceAtLeast(122.dp)
-        val coverHeight = minOf(maxWidth - 36.dp, (maxHeight * .50f).coerceIn(170.dp, 435.dp))
+        val availableWidth = maxWidth - 36.dp
+        val dialSize = minOf(availableWidth, (maxHeight * .48f).coerceIn(152.dp, 380.dp))
+        val coverHeight = minOf(availableWidth, (maxHeight - dialSize - 158.dp).coerceIn(120.dp, 340.dp))
+        val coverWidth = minOf(availableWidth, coverHeight * 1.35f)
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
-                Modifier.fillMaxWidth().height(coverHeight).clip(shape).background(Panel).border(1.dp, Line, shape)
+                Modifier.width(coverWidth).height(coverHeight).clip(shape).background(Panel).border(1.dp, Line, shape)
             ) {
                 AlbumCover(track, Modifier.matchParentSize())
                 if (track == null) {
@@ -79,7 +83,7 @@ fun NowPlaying(player: PlayerViewModel, state: Playback, openLibrary: () -> Unit
                     }
                 }
             }
-            Spacer(Modifier.height(13.dp))
+            Spacer(Modifier.height(10.dp))
             if (track == null) {
                 Row(
                     Modifier.fillMaxWidth().defaultMinSize(minHeight = 53.dp),
@@ -90,7 +94,7 @@ fun NowPlaying(player: PlayerViewModel, state: Playback, openLibrary: () -> Unit
                         Text("Pick a track", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
                         Text("From your device", color = Muted, fontSize = 13.sp)
                     }
-                    PlainButton("Try demo", enabled = state.connected) { player.playTracks(player.demos) }
+                    PlainButton("Try demo", enabled = state.connected) { player.playTracks(player.demos, QueueSource.Demo) }
                 }
             } else {
                 Column(Modifier.fillMaxWidth().defaultMinSize(minHeight = 53.dp)) {
@@ -109,52 +113,68 @@ fun NowPlaying(player: PlayerViewModel, state: Playback, openLibrary: () -> Unit
             }
             Spacer(Modifier.height(4.dp))
             PositionReadout(position, state.duration, preview)
-            Spacer(Modifier.height(10.dp))
             Row(
-                Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
+                Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Key(Glyph.Previous, "Previous track", enabled = track != null, onClick = player::skipPrevious)
-                Dial(
-                    diameter = dialSize,
-                    enabled = enabled,
-                    gestureKey = gestureKey,
-                    label = "Seek wheel",
-                    backwardLabel = "Back five seconds",
-                    forwardLabel = "Forward five seconds",
-                    centerIcon = if (state.playing) Glyph.Pause else Glyph.Play,
-                    centerLabel = if (state.playing) "Pause" else if (track != null) "Play" else "Open library",
-                    centerEnabled = state.connected,
-                    onCenter = { if (track == null) openLibrary() else player.togglePlayback() },
-                    onStart = { seekFrom = position.coerceIn(0, state.duration) },
-                    onStep = { steps ->
-                        val from = preview ?: seekFrom
-                        val target = (from + steps * SeekStepMs).coerceIn(0, state.duration)
-                        preview = target
-                        target != from
-                    },
-                    onFinish = { canceled ->
-                        val target = preview
-                        preview = null
-                        if (!canceled && target != null && gestureKey != null && target != seekFrom) {
-                            player.seek(gestureKey.first, gestureKey.second, target)
-                        }
-                    },
-                    onAccessibleStep = { step ->
-                        val target = (position + step * SeekStepMs).coerceIn(0, state.duration)
-                        if (target == position || gestureKey == null) {
-                            false
-                        } else {
-                            player.seek(gestureKey.first, gestureKey.second, target)
-                            true
-                        }
-                    }
+                val key = Modifier.weight(1f)
+                PlaybackOrderKeys(player, state, modifier = key, framed = false)
+                Key(
+                    Glyph.Previous, "Previous track", enabled = track != null, modifier = key,
+                    framed = false, onClick = player::skipPrevious
                 )
-                Key(Glyph.Next, "Next track", enabled = state.canSkipNext, onClick = player::skipNext)
+                Key(
+                    Glyph.Next, "Next track", enabled = state.canSkipNext, modifier = key,
+                    framed = false, onClick = player::skipNext
+                )
+                Key(Glyph.PlaylistAdd, "Add to playlist", enabled = track != null, modifier = key, framed = false) {
+                    playlistTrack = track
+                }
+                val favorite = track != null && track.id in favorites
+                Key(
+                    if (favorite) Glyph.HeartFilled else Glyph.Heart,
+                    if (favorite) "Remove from favorites" else "Add to favorites",
+                    enabled = track != null, active = favorite, modifier = key, framed = false
+                ) {
+                    track?.let(player::toggleFavorite)
+                }
             }
-            DotText("SEEK  ·  5 SEC / CLICK", Modifier.padding(top = 3.dp, bottom = 8.dp), size = 11)
+            Dial(
+                diameter = dialSize,
+                enabled = enabled,
+                gestureKey = gestureKey,
+                label = "Seek wheel",
+                backwardLabel = "Back five seconds",
+                forwardLabel = "Forward five seconds",
+                centerIcon = if (state.playing) Glyph.Pause else Glyph.Play,
+                centerLabel = if (state.playing) "Pause" else if (track != null) "Play" else "Open library",
+                centerEnabled = state.connected,
+                onCenter = { if (track == null) openLibrary() else player.togglePlayback() },
+                onStart = { seekFrom = position.coerceIn(0, state.duration) },
+                onStep = { steps ->
+                    val from = preview ?: seekFrom
+                    preview = (from + steps * SeekStepMs).coerceIn(0, state.duration)
+                },
+                onFinish = { canceled ->
+                    val target = preview
+                    preview = null
+                    if (!canceled && target != null && gestureKey != null && target != seekFrom) {
+                        player.seek(gestureKey.first, gestureKey.second, target)
+                    }
+                },
+                onAccessibleStep = { step ->
+                    val target = (position + step * SeekStepMs).coerceIn(0, state.duration)
+                    if (target == position || gestureKey == null) {
+                        false
+                    } else {
+                        player.seek(gestureKey.first, gestureKey.second, target)
+                        true
+                    }
+                }
+            )
         }
     }
+    playlistTrack?.let { AddToPlaylistDialog(player, it) { playlistTrack = null } }
 }
 
 @Composable

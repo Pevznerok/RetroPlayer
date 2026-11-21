@@ -23,7 +23,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.media3.common.Player
 
 @Composable
 fun QueueScreen(player: PlayerViewModel, state: Playback, openLibrary: () -> Unit) {
@@ -52,7 +51,7 @@ fun QueueScreen(player: PlayerViewModel, state: Playback, openLibrary: () -> Uni
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
-        val diameter = (maxHeight * .28f).coerceIn(116.dp, 174.dp)
+        val diameter = minOf(maxWidth, (maxHeight * .37f).coerceIn(116.dp, 250.dp))
         Column(Modifier.fillMaxSize()) {
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 10.dp),
@@ -61,21 +60,7 @@ fun QueueScreen(player: PlayerViewModel, state: Playback, openLibrary: () -> Uni
             ) {
                 Text("Play order", color = Ink, fontSize = 25.sp, fontWeight = FontWeight.SemiBold)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Key(
-                        Glyph.Shuffle, "Shuffle upcoming tracks",
-                        enabled = state.queue.lastIndex - state.index >= 2,
-                        onClick = player::shuffleUpcoming
-                    )
-                    val repeatLabel = when (state.repeat) {
-                        Player.REPEAT_MODE_ALL -> "Repeat all"
-                        Player.REPEAT_MODE_ONE -> "Repeat one"
-                        else -> "Repeat off"
-                    }
-                    Key(
-                        if (state.repeat == Player.REPEAT_MODE_ONE) Glyph.RepeatOne else Glyph.Repeat,
-                        "$repeatLabel. Change repeat mode", active = state.repeat != Player.REPEAT_MODE_OFF,
-                        onClick = player::cycleRepeat
-                    )
+                    PlaybackOrderKeys(player, state)
                 }
             }
             LazyColumn(Modifier.weight(1f), state = listState, verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -116,11 +101,10 @@ fun QueueScreen(player: PlayerViewModel, state: Playback, openLibrary: () -> Uni
                     centerEnabled = state.connected,
                     onCenter = { player.playQueueItem(selected) },
                     onStart = { startIndex = selected },
-                    onStep = ::advance,
+                    onStep = { advance(it) },
                     onFinish = { canceled -> if (canceled) selected = startIndex.coerceIn(state.queue.indices) },
                     onAccessibleStep = ::advance
                 )
-                DotText("BROWSE  ·  1 TRACK / CLICK", Modifier.padding(top = 4.dp), size = 11)
             }
         }
     }

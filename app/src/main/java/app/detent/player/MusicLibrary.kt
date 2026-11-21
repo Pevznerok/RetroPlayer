@@ -26,7 +26,7 @@ data class Track(
 ) {
     val id: String get() = uri.toString()
 
-    fun toMediaItem(): MediaItem = MediaItem.Builder()
+    fun toMediaItem(source: QueueSource): MediaItem = MediaItem.Builder()
         .setMediaId(id)
         .setUri(uri)
         .setMediaMetadata(
@@ -37,7 +37,11 @@ data class Track(
                 .setArtworkUri(artwork)
                 .setDurationMs(durationMs)
                 .setIsPlayable(true)
-                .setExtras(Bundle().apply { putString("format", format) })
+                .setExtras(Bundle().apply {
+                    putString("format", format)
+                    putString("sourceName", source.name)
+                    putString("sourcePlaylistId", source.playlistId)
+                })
                 .build()
         )
         .build()
@@ -69,6 +73,22 @@ data class Track(
             value.optString("format"),
             value.optString("artwork").takeIf(String::isNotBlank)?.let(Uri::parse)
         )
+    }
+}
+
+data class QueueSource(val name: String, val playlistId: String? = null) {
+    companion object {
+        val AllTracks = QueueSource("All tracks")
+        val Search = QueueSource("Search results")
+        val Favorites = QueueSource("Favorites")
+        val Demo = QueueSource("Room Tone")
+        val Queue = QueueSource("Queue")
+
+        fun fromMediaItem(item: MediaItem): QueueSource? {
+            val extras = item.mediaMetadata.extras
+            val name = extras?.getString("sourceName") ?: return null
+            return QueueSource(name, extras.getString("sourcePlaylistId"))
+        }
     }
 }
 
@@ -185,4 +205,10 @@ class PlaylistStore(context: Context) {
 
     fun create(name: String, firstTrack: Track?): SavedPlaylist =
         SavedPlaylist(UUID.randomUUID().toString(), name, listOfNotNull(firstTrack?.id))
+
+    fun loadFavorites(): Set<String> = prefs.getStringSet("favorites", emptySet()).orEmpty().toSet()
+
+    fun saveFavorites(ids: Set<String>) {
+        prefs.edit().putStringSet("favorites", ids.toSet()).apply()
+    }
 }

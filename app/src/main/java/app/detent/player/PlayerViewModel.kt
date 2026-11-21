@@ -26,6 +26,7 @@ import kotlinx.coroutines.withContext
 data class Playback(
     val connected: Boolean = false,
     val queue: List<Track> = emptyList(),
+    val source: QueueSource? = null,
     val index: Int = 0,
     val playing: Boolean = false,
     val duration: Long = 0L,
@@ -58,6 +59,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val playlistStore = PlaylistStore(application)
     private val _playlists = MutableStateFlow(playlistStore.load())
     val playlists = _playlists.asStateFlow()
+    private val _favorites = MutableStateFlow(playlistStore.loadFavorites())
+    val favorites = _favorites.asStateFlow()
     val demos = demoTracks(application)
 
     private var loadJob: Job? = null
@@ -126,10 +129,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun playTracks(tracks: List<Track>, index: Int = 0) {
+    fun playTracks(tracks: List<Track>, source: QueueSource, index: Int = 0) {
         val player = controller ?: return
         if (index !in tracks.indices) return
-        player.setMediaItems(tracks.map(Track::toMediaItem), index, C.TIME_UNSET)
+        player.setMediaItems(tracks.map { it.toMediaItem(source) }, index, C.TIME_UNSET)
         player.prepare()
         player.play()
     }
@@ -145,11 +148,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun playNext(track: Track) {
         val player = controller ?: return
         val index = if (player.mediaItemCount == 0) 0 else player.currentMediaItemIndex + 1
-        player.addMediaItem(index, track.toMediaItem())
+        player.addMediaItem(index, track.toMediaItem(_playback.value.source ?: QueueSource.Queue))
     }
 
     fun addToQueue(track: Track) {
-        controller?.addMediaItem(track.toMediaItem())
+        controller?.addMediaItem(track.toMediaItem(_playback.value.source ?: QueueSource.Queue))
     }
 
     fun moveQueueItem(from: Int, to: Int) {
@@ -236,6 +239,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         })
     }
 
+    fun toggleFavorite(track: Track) {
+        val ids = _favorites.value
+        val updated = if (track.id in ids) ids - track.id else ids + track.id
+        _favorites.value = updated
+        playlistStore.saveFavorites(updated)
+    }
+
     private fun updatePlaylists(lists: List<SavedPlaylist>) {
         _playlists.value = lists
         playlistStore.save(lists)
@@ -249,10 +259,16 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             _playback.value.queue
         }
         val index = player.currentMediaItemIndex
+        val source = when {
+            !queueChanged -> _playback.value.source
+            queue.isEmpty() -> null
+            else -> QueueSource.fromMediaItem(player.getMediaItemAt(0)) ?: QueueSource.Queue
+        }
         _position.value = player.currentPosition
         _playback.value = Playback(
             connected = true,
             queue = queue,
+            source = source,
             index = index,
             playing = player.playWhenReady &&
                 (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING),

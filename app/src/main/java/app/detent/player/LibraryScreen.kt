@@ -58,7 +58,11 @@ private enum class Sort(val label: String, val comparator: Comparator<Track>) {
     Duration("Longest first", compareByDescending { it.durationMs }),
 }
 
-private data class PlaylistEditor(val list: SavedPlaylist? = null, val track: Track? = null)
+private data class PlaylistEditor(val list: SavedPlaylist? = null)
+
+private enum class LibraryTab(val label: String) {
+    Songs("Songs"), Playlists("Playlists"), Favorites("Favorites")
+}
 
 @Composable
 fun LibraryScreen(
@@ -69,9 +73,10 @@ fun LibraryScreen(
 ) {
     val library by player.library.collectAsStateWithLifecycle()
     val lists by player.playlists.collectAsStateWithLifecycle()
+    val favorites by player.favorites.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val view = LocalView.current
-    var playlistsTab by rememberSaveable { mutableStateOf(false) }
+    var tab by rememberSaveable { mutableStateOf(LibraryTab.Songs) }
     var query by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf(Sort.Title) }
     var activePlaylistId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -88,12 +93,13 @@ fun LibraryScreen(
     }
     BackHandler(activePlaylist != null) { activePlaylistId = null }
 
-    fun play(tracks: List<Track>, index: Int = 0) {
-        player.playTracks(tracks, index)
+    fun play(tracks: List<Track>, source: QueueSource, index: Int = 0) {
+        player.playTracks(tracks, source, index)
         showPlayer()
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp).imePadding()) {
         if (activePlaylist != null) {
+            val source = QueueSource(activePlaylist.name, activePlaylist.id)
             val available = remember(activePlaylist, trackById) { activePlaylist.trackIds.mapNotNull(trackById::get) }
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 8.dp),
@@ -110,8 +116,8 @@ fun LibraryScreen(
                 ))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PlainButton("Play all", enabled = connected && available.isNotEmpty()) { play(available) }
-                PlainButton("Shuffle", enabled = connected && available.size > 1) { play(available.shuffled()) }
+                PlainButton("Play all", enabled = connected && available.isNotEmpty()) { play(available, source) }
+                PlainButton("Shuffle", enabled = connected && available.size > 1) { play(available.shuffled(), source) }
             }
             val missing = activePlaylist.trackIds.size - available.size
             if (missing > 0) {
@@ -122,13 +128,13 @@ fun LibraryScreen(
                 EmptyScreen("Empty playlist", "Add tracks from the menu next to each song in the library.") {
                     PlainButton("Browse songs") {
                         activePlaylistId = null
-                        playlistsTab = false
+                        tab = LibraryTab.Songs
                     }
                 }
             } else {
                 LazyColumn(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     itemsIndexed(available, key = { _, track -> track.id }) { index, track ->
-                        TrackRow(track, onClick = { if (connected) play(available, index) }) {
+                        TrackRow(track, onClick = { if (connected) play(available, source, index) }) {
                             LibraryTrackMenu(track, connected, player, { addTrack = track }) {
                                 player.removeFromPlaylist(activePlaylist.id, track)
                             }
@@ -141,23 +147,23 @@ fun LibraryScreen(
                 Modifier.fillMaxWidth().padding(bottom = 11.dp).selectableGroup(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                for ((label, isPlaylist) in listOf("Songs" to false, "Playlists" to true)) {
-                    val selected = isPlaylist == playlistsTab
+                for (entry in LibraryTab.entries) {
+                    val selected = entry == tab
                     val shape = RoundedCornerShape(9.dp)
                     Box(
                         Modifier.weight(1f).clip(shape).background(if (selected) Raised else Case)
                             .border(1.dp, if (selected) Dim else Line, shape)
                             .selectable(selected, role = Role.Tab) {
                                 if (!selected) view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                playlistsTab = isPlaylist
+                                tab = entry
                             }.padding(10.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(label, color = if (selected) Ink else Muted, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(entry.label, color = if (selected) Ink else Muted, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     }
                 }
             }
-            if (playlistsTab) {
+            if (tab == LibraryTab.Playlists) {
                 if (lists.isEmpty()) {
                     EmptyScreen("No playlists", "Save a group of songs to play again in your own order.") {
                         PlainButton("New playlist") { editor = PlaylistEditor() }
@@ -175,6 +181,28 @@ fun LibraryScreen(
                                 Symbol(Glyph.Queue, 21.dp, Muted)
                                 Text(list.name, Modifier.weight(1f), color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 DotText("${list.trackIds.size}", size = 12)
+                            }
+                        }
+                    }
+                }
+            } else if (tab == LibraryTab.Favorites) {
+                val available = remember(favorites, trackById, sort) {
+                    favorites.mapNotNull(trackById::get).sortedWith(sort.comparator)
+                }
+                when {
+                    favorites.isEmpty() -> EmptyScreen("No favorites yet", "Tap the heart on the Player screen.") {}
+                    available.isEmpty() && !library.allowed ->
+                        EmptyScreen("Find your favorites", "Allow audio access to load your saved tracks.") {
+                            PlainButton("Allow access", onClick = requestPermission)
+                        }
+                    available.isEmpty() -> EmptyScreen("Favorites unavailable", "Your saved tracks are missing from the library.") {}
+                    else -> {
+                        PlainButton("Play all", enabled = connected) { play(available, QueueSource.Favorites) }
+                        LazyColumn(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            itemsIndexed(available, key = { _, track -> track.id }) { index, track ->
+                                TrackRow(track, onClick = { if (connected) play(available, QueueSource.Favorites, index) }) {
+                                    LibraryTrackMenu(track, connected, player, { addTrack = track }, favorite = true)
+                                }
                             }
                         }
                     }
@@ -231,7 +259,8 @@ fun LibraryScreen(
                     }
                     else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         itemsIndexed(visible, key = { _, track -> track.id }) { index, track ->
-                            TrackRow(track, onClick = { if (connected) play(visible, index) }) {
+                            val source = if (query.isBlank()) QueueSource.AllTracks else QueueSource.Search
+                            TrackRow(track, onClick = { if (connected) play(visible, source, index) }) {
                                 LibraryTrackMenu(track, connected, player, { addTrack = track })
                             }
                         }
@@ -242,57 +271,18 @@ fun LibraryScreen(
     }
 
     addTrack?.let { track ->
-        AlertDialog(
-            onDismissRequest = { addTrack = null },
-            title = { Text("Add to playlist") },
-            text = {
-                if (lists.isEmpty()) Text("Create a playlist for ${track.title}.")
-                else LazyColumn {
-                    items(lists, key = SavedPlaylist::id) { list ->
-                        TextButton(
-                            onClick = {
-                                player.addToPlaylist(list.id, track)
-                                addTrack = null
-                            },
-                            enabled = track.id !in list.trackIds
-                        ) {
-                            Text(if (track.id in list.trackIds) "${list.name} · Added" else list.name)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    addTrack = null
-                    editor = PlaylistEditor(track = track)
-                }) { Text("New playlist") }
-            },
-            dismissButton = { TextButton({ addTrack = null }) { Text("Cancel") } }
-        )
+        AddToPlaylistDialog(player, track) { addTrack = null }
     }
 
     editor?.let { current ->
-        var name by remember(current) { mutableStateOf(current.list?.name.orEmpty()) }
-        AlertDialog(
-            onDismissRequest = { editor = null },
-            title = { Text(if (current.list == null) "New playlist" else "Rename playlist") },
-            text = {
-                OutlinedTextField(
-                    name, { name = it.take(80) }, label = { Text("Name") },
-                    singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done)
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = name.isNotBlank(),
-                    onClick = {
-                        if (current.list == null) player.createPlaylist(name, current.track)
-                        else player.renamePlaylist(current.list.id, name)
-                        editor = null
-                    }
-                ) { Text("Save") }
-            },
-            dismissButton = { TextButton({ editor = null }) { Text("Cancel") } }
+        PlaylistNameDialog(
+            existingName = current.list?.name,
+            onDismiss = { editor = null },
+            onSave = { name ->
+                if (current.list == null) player.createPlaylist(name)
+                else player.renamePlaylist(current.list.id, name)
+                editor = null
+            }
         )
     }
 
@@ -319,6 +309,7 @@ private fun LibraryTrackMenu(
     connected: Boolean,
     player: PlayerViewModel,
     addToPlaylist: () -> Unit,
+    favorite: Boolean = false,
     remove: (() -> Unit)? = null,
 ) {
     TrackMenu("Actions for ${track.title}", buildList {
@@ -327,6 +318,7 @@ private fun LibraryTrackMenu(
             add("Add to queue" to { player.addToQueue(track) })
         }
         add("Add to playlist" to addToPlaylist)
+        if (favorite) add("Remove from favorites" to { player.toggleFavorite(track) })
         if (remove != null) add("Remove from playlist" to remove)
     })
 }

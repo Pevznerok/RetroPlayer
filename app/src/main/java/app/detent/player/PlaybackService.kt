@@ -85,7 +85,11 @@ class PlaybackService : MediaSessionService() {
         for (index in 0 until player.mediaItemCount) {
             queue.put(Track.fromMediaItem(player.getMediaItemAt(index)).toJson())
         }
+        val source = if (player.mediaItemCount == 0) null
+        else QueueSource.fromMediaItem(player.getMediaItemAt(0))
         prefs.edit().putString("queue", queue.toString())
+            .putString("sourceName", source?.name)
+            .putString("sourcePlaylistId", source?.playlistId)
             .putInt("index", player.currentMediaItemIndex)
             .putLong("position", player.currentPosition)
             .apply()
@@ -102,11 +106,15 @@ class PlaybackService : MediaSessionService() {
     private fun restore() {
         val queue = runCatching {
             val data = JSONArray(prefs.getString("queue", "[]"))
-            (0 until data.length()).map { Track.fromJson(data.getJSONObject(it)).toMediaItem() }
+            (0 until data.length()).map { Track.fromJson(data.getJSONObject(it)) }
         }.getOrDefault(emptyList())
         if (queue.isNotEmpty()) {
             val index = prefs.getInt("index", 0).coerceIn(queue.indices)
-            player.setMediaItems(queue, index, prefs.getLong("position", 0).coerceAtLeast(0))
+            val source = prefs.getString("sourceName", null)?.let { QueueSource(it, prefs.getString("sourcePlaylistId", null)) }
+                ?: if (queue.all { it.uri.scheme == "android.resource" }) QueueSource.Demo else QueueSource.Queue
+            player.setMediaItems(
+                queue.map { it.toMediaItem(source) }, index, prefs.getLong("position", 0).coerceAtLeast(0)
+            )
         }
         player.repeatMode = prefs.getInt("repeat", Player.REPEAT_MODE_OFF)
             .coerceIn(Player.REPEAT_MODE_OFF, Player.REPEAT_MODE_ALL)

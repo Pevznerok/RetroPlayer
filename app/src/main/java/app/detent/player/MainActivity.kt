@@ -86,7 +86,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Screen(val title: String, val icon: Glyph) {
-    Player("Player", Glyph.Record), Library("Library", Glyph.Library), Queue("Queue", Glyph.Queue)
+    Queue("Queue", Glyph.Queue), Player("Player", Glyph.Record), Library("Library", Glyph.Library)
 }
 
 @Composable
@@ -94,6 +94,7 @@ private fun Detent(player: PlayerViewModel, requestPermission: () -> Unit) {
     var screen by rememberSaveable { mutableStateOf(Screen.Player) }
     val screenStates = rememberSaveableStateHolder()
     val playback by player.playback.collectAsStateWithLifecycle()
+    val playlists by player.playlists.collectAsStateWithLifecycle()
     val view = LocalView.current
     BackHandler(screen != Screen.Player) { screen = Screen.Player }
 
@@ -103,20 +104,29 @@ private fun Detent(player: PlayerViewModel, requestPermission: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Symbol(Glyph.Record, 19.dp, Signal)
-                DotText("DETENT", color = Ink, size = 24)
+                val source = playback.source.takeIf { screen == Screen.Player }
+                val sourceName = source?.let { queueSource ->
+                    playlists.firstOrNull { it.id == queueSource.playlistId }?.name ?: queueSource.name
+                }
+                DotText(sourceName ?: "DETENT", color = Ink, size = 22, maxLines = 1)
             }
             val status = when (screen) {
-                Screen.Player -> playback.current?.format?.ifBlank { "LOCAL" } ?: "OFFLINE"
+                Screen.Player -> null
                 Screen.Library -> "ON DEVICE"
                 Screen.Queue -> "${playback.queue.size} TRACK${if (playback.queue.size == 1) "" else "S"}"
             }
-            Box(
-                Modifier.border(1.dp, Line, CircleShape).padding(horizontal = 10.dp, vertical = 4.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                DotText(status, color = if (status == "FLAC") Signal else Muted, size = 10)
+            if (status != null) {
+                Box(
+                    Modifier.border(1.dp, Line, CircleShape).padding(horizontal = 10.dp, vertical = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    DotText(status, size = 10)
+                }
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {

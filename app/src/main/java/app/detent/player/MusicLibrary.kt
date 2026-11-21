@@ -144,12 +144,15 @@ fun readArtwork(context: Context, track: Track): Bitmap? = runCatching {
 }.getOrNull()
 
 fun demoTracks(context: Context): List<Track> {
-    val base = "android.resource://${context.packageName}"
-    val artwork = Uri.parse("$base/drawable/room_tone")
+    fun resourceUri(id: Int): Uri {
+        val path = context.resources.getResourceName(id).substringAfter(':')
+        return Uri.parse("android.resource://${context.packageName}/$path")
+    }
+    val artwork = resourceUri(R.drawable.room_tone)
     return listOf(
-        Track(Uri.parse("$base/raw/phase"), "Phase Drift", "Detent demos", "Room Tone", 32_000, "FLAC", artwork),
-        Track(Uri.parse("$base/raw/distant"), "Distant Signal", "Detent demos", "Room Tone", 38_000, "FLAC", artwork),
-        Track(Uri.parse("$base/raw/afterimage"), "Afterimage", "Detent demos", "Room Tone", 44_000, "FLAC", artwork),
+        Track(resourceUri(R.raw.phase), "Phase Drift", "Detent demos", "Room Tone", 32_000, "FLAC", artwork),
+        Track(resourceUri(R.raw.distant), "Distant Signal", "Detent demos", "Room Tone", 38_000, "FLAC", artwork),
+        Track(resourceUri(R.raw.afterimage), "Afterimage", "Detent demos", "Room Tone", 44_000, "FLAC", artwork),
     )
 }
 

@@ -5,10 +5,12 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -108,12 +110,14 @@ class PlaybackService : MediaSessionService() {
     }
 
     private inner class SessionCallback : MediaSession.Callback {
+        @OptIn(UnstableApi::class)
         override fun onConnect(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
         ): MediaSession.ConnectionResult {
             val connection = super.onConnect(session, controller)
             if (controller.packageName == packageName || !connection.isAccepted) return connection
+            if (!controller.isTrusted) return MediaSession.ConnectionResult.reject()
             return MediaSession.ConnectionResult.accept(
                 connection.availableSessionCommands,
                 connection.availablePlayerCommands.buildUpon()

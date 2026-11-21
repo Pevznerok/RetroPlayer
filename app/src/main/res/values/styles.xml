@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Detent</string>
+    <style name="Theme.Detent" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#141414</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#141414</item>
+        <item name="android:navigationBarColor">#141414</item>
+    </style>
+</resources>

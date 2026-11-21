@@ -61,6 +61,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     val playlists = _playlists.asStateFlow()
     private val _favorites = MutableStateFlow(playlistStore.loadFavorites())
     val favorites = _favorites.asStateFlow()
+    private val queueStore = QueueStore(application)
+    private val _savedQueues = MutableStateFlow(queueStore.summaries())
+    val savedQueues = _savedQueues.asStateFlow()
     val demos = demoTracks(application)
 
     private var loadJob: Job? = null
@@ -132,9 +135,68 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun playTracks(tracks: List<Track>, source: QueueSource, index: Int = 0) {
         val player = controller ?: return
         if (index !in tracks.indices) return
-        player.setMediaItems(tracks.map { it.toMediaItem(source) }, index, C.TIME_UNSET)
+        val active = queueSource(player)
+        if (active?.copy(queueId = null) == source && player.mediaItemCount == tracks.size &&
+            tracks.indices.all { player.getMediaItemAt(it).mediaId == tracks[it].id }
+        ) {
+            playQueueItem(index)
+            return
+        }
+        saveCurrentQueue(player)
+        val queue = source.newQueue()
+        player.setMediaItems(tracks.map { it.toMediaItem(queue) }, index, C.TIME_UNSET)
         player.prepare()
         player.play()
+    }
+
+    fun saveQueue(tracks: List<Track>, source: QueueSource) {
+        if (tracks.isEmpty()) return
+        queueStore.save(QueueSnapshot(source.newQueue(), tracks, 0, 0L, Player.REPEAT_MODE_OFF))
+        refreshQueues()
+    }
+
+    fun switchQueue(id: String) {
+        val player = controller ?: return
+        if (id == queueSource(player)?.queueId) return
+        val queue = queueStore.load(id) ?: return
+        val shouldPlay = player.mediaItemCount == 0 || player.playWhenReady
+        saveCurrentQueue(player)
+        player.setMediaItems(queue.tracks.map { it.toMediaItem(queue.source) }, queue.index, queue.positionMs)
+        player.repeatMode = queue.repeat.coerceIn(Player.REPEAT_MODE_OFF, Player.REPEAT_MODE_ALL)
+        player.playWhenReady = shouldPlay
+        player.prepare()
+    }
+
+    fun renameQueue(id: String, name: String) {
+        val title = name.trim()
+        if (title.isEmpty()) return
+        val player = controller
+        if (player != null && id == queueSource(player)?.queueId) saveCurrentQueue(player)
+        queueStore.rename(id, title)
+        refreshQueues()
+    }
+
+    fun removeSavedQueue(id: String) {
+        val player = controller ?: return
+        if (id == queueSource(player)?.queueId) return
+        queueStore.remove(id)
+        refreshQueues()
+    }
+
+    private fun saveCurrentQueue(player: MediaController) {
+        val source = queueSource(player) ?: return
+        val tracks = (0 until player.mediaItemCount).map { Track.fromMediaItem(player.getMediaItemAt(it)) }
+        queueStore.save(
+            QueueSnapshot(source, tracks, player.currentMediaItemIndex, player.currentPosition, player.repeatMode)
+        )
+        refreshQueues()
+    }
+
+    private fun queueSource(player: MediaController): QueueSource? =
+        if (player.mediaItemCount == 0) null else QueueSource.fromMediaItem(player.getMediaItemAt(0))
+
+    private fun refreshQueues() {
+        _savedQueues.value = queueStore.summaries()
     }
 
     fun playQueueItem(index: Int) {
@@ -148,11 +210,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun playNext(track: Track) {
         val player = controller ?: return
         val index = if (player.mediaItemCount == 0) 0 else player.currentMediaItemIndex + 1
-        player.addMediaItem(index, track.toMediaItem(_playback.value.source ?: QueueSource.Queue))
+        player.addMediaItem(index, track.toMediaItem(queueSource(player) ?: QueueSource.Queue.newQueue()))
     }
 
     fun addToQueue(track: Track) {
-        controller?.addMediaItem(track.toMediaItem(_playback.value.source ?: QueueSource.Queue))
+        val player = controller ?: return
+        player.addMediaItem(track.toMediaItem(queueSource(player) ?: QueueSource.Queue.newQueue()))
     }
 
     fun moveQueueItem(from: Int, to: Int) {
@@ -163,7 +226,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun removeQueueItem(index: Int) {
         val player = controller ?: return
-        if (index in 0 until player.mediaItemCount) player.removeMediaItem(index)
+        if (index !in 0 until player.mediaItemCount) return
+        if (player.mediaItemCount == 1) {
+            queueSource(player)?.queueId?.let { queueStore.remove(it) }
+            refreshQueues()
+        }
+        player.removeMediaItem(index)
     }
 
     fun shuffleUpcoming() {

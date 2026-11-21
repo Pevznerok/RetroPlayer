@@ -19,6 +19,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -92,9 +93,11 @@ private enum class Screen(val title: String, val icon: Glyph) {
 @Composable
 private fun Detent(player: PlayerViewModel, requestPermission: () -> Unit) {
     var screen by rememberSaveable { mutableStateOf(Screen.Player) }
+    var showQueues by rememberSaveable { mutableStateOf(false) }
     val screenStates = rememberSaveableStateHolder()
     val playback by player.playback.collectAsStateWithLifecycle()
     val playlists by player.playlists.collectAsStateWithLifecycle()
+    val savedQueues by player.savedQueues.collectAsStateWithLifecycle()
     val view = LocalView.current
     BackHandler(screen != Screen.Player) { screen = Screen.Player }
 
@@ -111,7 +114,8 @@ private fun Detent(player: PlayerViewModel, requestPermission: () -> Unit) {
                 Symbol(Glyph.Record, 19.dp, Signal)
                 val source = playback.source.takeIf { screen == Screen.Player }
                 val sourceName = source?.let { queueSource ->
-                    playlists.firstOrNull { it.id == queueSource.playlistId }?.name ?: queueSource.name
+                    savedQueues.firstOrNull { it.id == queueSource.queueId }?.title(playlists)
+                        ?: playlists.firstOrNull { it.id == queueSource.playlistId }?.name ?: queueSource.name
                 }
                 DotText(sourceName ?: "DETENT", color = Ink, size = 22, maxLines = 1)
             }
@@ -129,12 +133,27 @@ private fun Detent(player: PlayerViewModel, requestPermission: () -> Unit) {
                 }
             }
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val dialSize = minOf(
+                248.dp, (maxWidth - 148.dp).coerceAtLeast(80.dp),
+                (maxHeight * .42f).coerceAtLeast(100.dp)
+            )
             screenStates.SaveableStateProvider(screen.name) {
                 when (screen) {
-                    Screen.Player -> NowPlaying(player, playback) { screen = Screen.Library }
-                    Screen.Library -> LibraryScreen(player, playback.connected, requestPermission) { screen = Screen.Player }
-                    Screen.Queue -> QueueScreen(player, playback) { screen = Screen.Library }
+                    Screen.Player -> NowPlaying(player, playback, dialSize) { screen = Screen.Library }
+                    Screen.Library -> LibraryScreen(
+                        player, playback.connected, requestPermission,
+                        showPlayer = { screen = Screen.Player },
+                        showQueues = {
+                            screen = Screen.Queue
+                            showQueues = true
+                        }
+                    )
+                    Screen.Queue -> QueueScreen(
+                        player, playback, dialSize,
+                        openLibrary = { screen = Screen.Library },
+                        openQueues = { showQueues = true }
+                    )
                 }
             }
         }
@@ -155,6 +174,9 @@ private fun Detent(player: PlayerViewModel, requestPermission: () -> Unit) {
                 }
             }
         }
+    }
+    if (showQueues) {
+        QueueManager(player, playback, savedQueues, playlists) { showQueues = false }
     }
 }
 

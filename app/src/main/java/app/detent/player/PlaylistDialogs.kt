@@ -20,7 +20,8 @@ fun AddToPlaylistDialog(player: PlayerViewModel, track: Track, onDismiss: () -> 
     val lists by player.playlists.collectAsStateWithLifecycle()
     var creating by remember(track.id) { mutableStateOf(false) }
     if (creating) {
-        PlaylistNameDialog(
+        NameDialog(
+            title = "New playlist",
             onDismiss = onDismiss,
             onSave = { name ->
                 player.createPlaylist(name, track)
@@ -55,15 +56,16 @@ fun AddToPlaylistDialog(player: PlayerViewModel, track: Track, onDismiss: () -> 
 }
 
 @Composable
-fun PlaylistNameDialog(
-    existingName: String? = null,
+fun NameDialog(
+    title: String,
+    initialName: String = "",
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
 ) {
-    var name by remember(existingName) { mutableStateOf(existingName.orEmpty()) }
+    var name by remember(initialName) { mutableStateOf(initialName) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (existingName == null) "New playlist" else "Rename playlist") },
+        title = { Text(title) },
         text = {
             OutlinedTextField(
                 name, { name = it.take(80) }, label = { Text("Name") },

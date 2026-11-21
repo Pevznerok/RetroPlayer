@@ -1,6 +1,7 @@
 package app.detent.player
 
 import android.graphics.Bitmap
+import android.util.LruCache
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -16,7 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -41,16 +42,18 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.withContext
 
-private const val SeekStepMs = 5_000L
+private const val SeekStepMs = 2_000L
 
 @Composable
-fun NowPlaying(player: PlayerViewModel, state: Playback, openLibrary: () -> Unit) {
+fun NowPlaying(player: PlayerViewModel, state: Playback, dialSize: Dp, openLibrary: () -> Unit) {
     val track = state.current
     val favorites by player.favorites.collectAsStateWithLifecycle()
     val position by player.position.collectAsStateWithLifecycle()
@@ -63,15 +66,13 @@ fun NowPlaying(player: PlayerViewModel, state: Playback, openLibrary: () -> Unit
 
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val availableWidth = maxWidth - 36.dp
-        val dialSize = minOf(availableWidth, (maxHeight * .48f).coerceIn(152.dp, 380.dp))
-        val coverHeight = minOf(availableWidth, (maxHeight - dialSize - 158.dp).coerceIn(120.dp, 340.dp))
-        val coverWidth = minOf(availableWidth, coverHeight * 1.35f)
+        val coverSize = minOf(availableWidth, (maxHeight - dialSize - 158.dp).coerceIn(112.dp, 340.dp))
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
-                Modifier.width(coverWidth).height(coverHeight).clip(shape).background(Panel).border(1.dp, Line, shape)
+                Modifier.size(coverSize).clip(shape).background(Panel).border(1.dp, Line, shape)
             ) {
                 AlbumCover(track, Modifier.matchParentSize())
                 if (track == null) {
@@ -119,14 +120,6 @@ fun NowPlaying(player: PlayerViewModel, state: Playback, openLibrary: () -> Unit
             ) {
                 val key = Modifier.weight(1f)
                 PlaybackOrderKeys(player, state, modifier = key, framed = false)
-                Key(
-                    Glyph.Previous, "Previous track", enabled = track != null, modifier = key,
-                    framed = false, onClick = player::skipPrevious
-                )
-                Key(
-                    Glyph.Next, "Next track", enabled = state.canSkipNext, modifier = key,
-                    framed = false, onClick = player::skipNext
-                )
                 Key(Glyph.PlaylistAdd, "Add to playlist", enabled = track != null, modifier = key, framed = false) {
                     playlistTrack = track
                 }
@@ -139,39 +132,55 @@ fun NowPlaying(player: PlayerViewModel, state: Playback, openLibrary: () -> Unit
                     track?.let(player::toggleFavorite)
                 }
             }
-            Dial(
-                diameter = dialSize,
-                enabled = enabled,
-                gestureKey = gestureKey,
-                label = "Seek wheel",
-                backwardLabel = "Back five seconds",
-                forwardLabel = "Forward five seconds",
-                centerIcon = if (state.playing) Glyph.Pause else Glyph.Play,
-                centerLabel = if (state.playing) "Pause" else if (track != null) "Play" else "Open library",
-                centerEnabled = state.connected,
-                onCenter = { if (track == null) openLibrary() else player.togglePlayback() },
-                onStart = { seekFrom = position.coerceIn(0, state.duration) },
-                onStep = { steps ->
-                    val from = preview ?: seekFrom
-                    preview = (from + steps * SeekStepMs).coerceIn(0, state.duration)
-                },
-                onFinish = { canceled ->
-                    val target = preview
-                    preview = null
-                    if (!canceled && target != null && gestureKey != null && target != seekFrom) {
-                        player.seek(gestureKey.first, gestureKey.second, target)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Key(
+                    Glyph.Previous, "Previous track", enabled = track != null,
+                    framed = false, onClick = player::skipPrevious
+                )
+                Dial(
+                    diameter = dialSize,
+                    enabled = enabled,
+                    gestureKey = gestureKey,
+                    label = "Seek wheel",
+                    backwardLabel = "Back two seconds",
+                    forwardLabel = "Forward two seconds",
+                    centerIcon = if (state.playing) Glyph.Pause else Glyph.Play,
+                    centerLabel = if (state.playing) "Pause" else if (track != null) "Play" else "Open library",
+                    centerEnabled = state.connected,
+                    onCenter = { if (track == null) openLibrary() else player.togglePlayback() },
+                    onStart = { seekFrom = position.coerceIn(0, state.duration) },
+                    onStep = { steps ->
+                        val from = preview ?: seekFrom
+                        val target = (from + steps * SeekStepMs).coerceIn(0, state.duration)
+                        preview = target
+                        target != from
+                    },
+                    onFinish = { canceled ->
+                        val target = preview
+                        preview = null
+                        if (!canceled && target != null && gestureKey != null && target != seekFrom) {
+                            player.seek(gestureKey.first, gestureKey.second, target)
+                        }
+                    },
+                    onAccessibleStep = { step ->
+                        val target = (position + step * SeekStepMs).coerceIn(0, state.duration)
+                        if (target == position || gestureKey == null) {
+                            false
+                        } else {
+                            player.seek(gestureKey.first, gestureKey.second, target)
+                            true
+                        }
                     }
-                },
-                onAccessibleStep = { step ->
-                    val target = (position + step * SeekStepMs).coerceIn(0, state.duration)
-                    if (target == position || gestureKey == null) {
-                        false
-                    } else {
-                        player.seek(gestureKey.first, gestureKey.second, target)
-                        true
-                    }
-                }
-            )
+                )
+                Key(
+                    Glyph.Next, "Next track", enabled = state.canSkipNext,
+                    framed = false, onClick = player::skipNext
+                )
+            }
         }
     }
     playlistTrack?.let { AddToPlaylistDialog(player, it) { playlistTrack = null } }
@@ -201,14 +210,33 @@ private fun PositionReadout(position: Long, duration: Long, preview: Long?) {
     }
 }
 
+private class CachedArtwork(val bitmap: Bitmap?)
+
+private val thumbnails = object : LruCache<String, CachedArtwork>(12 * 1024 * 1024) {
+    override fun sizeOf(key: String, value: CachedArtwork): Int =
+        value.bitmap?.allocationByteCount ?: 512
+}
+@OptIn(ExperimentalCoroutinesApi::class)
+private val thumbnailDispatcher = Dispatchers.IO.limitedParallelism(3)
+
 @Composable
-private fun AlbumCover(track: Track?, modifier: Modifier) {
+fun AlbumCover(track: Track?, modifier: Modifier, thumbnail: Boolean = false) {
     val context = LocalContext.current
-    var bitmap by remember(track?.id) { mutableStateOf<Bitmap?>(null) }
+    var bitmap by remember(track?.id, thumbnail) { mutableStateOf<Bitmap?>(null) }
     val demo = track == null || track.artwork != null
-    LaunchedEffect(track?.id) {
+    LaunchedEffect(track?.id, thumbnail) {
         if (track != null && !demo) {
-            bitmap = withContext(Dispatchers.IO) { readArtwork(context, track) }
+            bitmap = if (thumbnail) {
+                withContext(thumbnailDispatcher) {
+                    val cached = thumbnails.get(track.id)
+                    val artwork = cached ?: CachedArtwork(readArtwork(context, track, maxSize = 192)).also {
+                        thumbnails.put(track.id, it)
+                    }
+                    artwork.bitmap
+                }
+            } else {
+                withContext(Dispatchers.IO) { readArtwork(context, track) }
+            }
         }
     }
 

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -42,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -70,11 +72,13 @@ fun LibraryScreen(
     connected: Boolean,
     requestPermission: () -> Unit,
     showPlayer: () -> Unit,
+    showQueues: () -> Unit,
 ) {
     val library by player.library.collectAsStateWithLifecycle()
     val lists by player.playlists.collectAsStateWithLifecycle()
     val favorites by player.favorites.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val focus = LocalFocusManager.current
     val view = LocalView.current
     var tab by rememberSaveable { mutableStateOf(LibraryTab.Songs) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -85,11 +89,17 @@ fun LibraryScreen(
     var deletePlaylist by remember { mutableStateOf<SavedPlaylist?>(null) }
     val activePlaylist = lists.firstOrNull { it.id == activePlaylistId }
     val trackById = remember(library.tracks, player.demos) { (library.tracks + player.demos).associateBy(Track::id) }
-    val visible = remember(library.tracks, query, sort) {
+    val orderedTracks = remember(library.tracks, sort) { library.tracks.sortedWith(sort.comparator) }
+    val visible = remember(orderedTracks, query) {
         val terms = query.trim().split(Regex("\\s+")).filter(String::isNotBlank)
-        library.tracks.filter { track ->
-            terms.all { term -> listOf(track.title, track.artist, track.album).any { it.contains(term, ignoreCase = true) } }
-        }.sortedWith(sort.comparator)
+        if (terms.isEmpty()) orderedTracks
+        else orderedTracks.filter { track ->
+            terms.all { term ->
+                track.title.contains(term, ignoreCase = true) ||
+                    track.artist.contains(term, ignoreCase = true) ||
+                    track.album.contains(term, ignoreCase = true)
+            }
+        }
     }
     BackHandler(activePlaylist != null) { activePlaylistId = null }
 
@@ -222,7 +232,7 @@ fun LibraryScreen(
                 OutlinedTextField(
                     value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(),
                     singleLine = true, shape = RoundedCornerShape(9.dp),
-                    placeholder = { Text("Search tracks, artists, albums") },
+                    placeholder = { Text("Search songs, artists, albums") },
                     leadingIcon = { Symbol(Glyph.Search, 20.dp, Muted) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
                 )
@@ -247,6 +257,13 @@ fun LibraryScreen(
                         Key(Glyph.Refresh, "Rescan library", enabled = !library.loading) { player.reloadLibrary() }
                     }
                 }
+                if (query.isNotBlank() && visible.isNotEmpty() && !library.error) {
+                    PlainButton("Save as queue", Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                        player.saveQueue(visible, QueueSource.search(query))
+                        focus.clearFocus()
+                        showQueues()
+                    }
+                }
                 when {
                     library.error -> EmptyScreen("Couldn’t read the library", "Check that audio access is enabled.") {
                         PlainButton("Try again") { player.reloadLibrary() }
@@ -259,7 +276,7 @@ fun LibraryScreen(
                     }
                     else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         itemsIndexed(visible, key = { _, track -> track.id }) { index, track ->
-                            val source = if (query.isBlank()) QueueSource.AllTracks else QueueSource.Search
+                            val source = if (query.isBlank()) QueueSource.AllTracks else QueueSource.search(query)
                             TrackRow(track, onClick = { if (connected) play(visible, source, index) }) {
                                 LibraryTrackMenu(track, connected, player, { addTrack = track })
                             }
@@ -275,8 +292,9 @@ fun LibraryScreen(
     }
 
     editor?.let { current ->
-        PlaylistNameDialog(
-            existingName = current.list?.name,
+        NameDialog(
+            title = if (current.list == null) "New playlist" else "Rename playlist",
+            initialName = current.list?.name.orEmpty(),
             onDismiss = { editor = null },
             onSave = { name ->
                 if (current.list == null) player.createPlaylist(name)
@@ -328,13 +346,15 @@ fun TrackRow(
     track: Track,
     selected: Boolean = false,
     leading: String? = null,
+    showArtwork: Boolean = false,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
     actions: @Composable () -> Unit,
 ) {
     val shape = RoundedCornerShape(8.dp)
     val view = LocalView.current
     Row(
-        Modifier.fillMaxWidth().defaultMinSize(minHeight = 58.dp).clip(shape)
+        modifier.fillMaxWidth().defaultMinSize(minHeight = 58.dp).clip(shape)
             .background(if (selected) Raised else Panel)
             .border(1.dp, if (selected) Signal else Panel, shape)
             .clickable {
@@ -345,6 +365,9 @@ fun TrackRow(
     ) {
         if (leading != null) {
             DotText(leading, Modifier.width(32.dp), color = if (leading == "NOW") Signal else Muted, size = 11)
+        }
+        if (showArtwork) {
+            AlbumCover(track, Modifier.size(40.dp).clip(RoundedCornerShape(5.dp)), thumbnail = true)
         }
         Column(Modifier.weight(1f).padding(vertical = 7.dp)) {
             Text(track.title, color = Ink, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

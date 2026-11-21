@@ -37,8 +37,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
-private const val DetentDegrees = 15f
-private const val NotchDegrees = DetentDegrees / 2
+private const val DetentDegrees = 7.5f
 private const val TickIntervalMs = 17L
 
 @Composable
@@ -54,7 +53,7 @@ fun Dial(
     centerEnabled: Boolean,
     onCenter: () -> Unit,
     onStart: () -> Unit,
-    onStep: (Int) -> Unit,
+    onStep: (Int) -> Boolean,
     onFinish: (Boolean) -> Unit,
     onAccessibleStep: (Int) -> Boolean,
 ) {
@@ -93,7 +92,6 @@ fun Dial(
                     var angle = angleAt(down.position - center)
                     var accumulated = 0f
                     var applied = 0
-                    var lastNotch = 0
                     var lastTick = 0L
                     var canceled = true
                     try {
@@ -112,15 +110,11 @@ fun Dial(
                             angle = nextAngle
                             val detents = (accumulated / DetentDegrees).toInt()
                             rotation = (turnStart + accumulated) % 360
-                            if (detents != applied) {
-                                step(detents - applied)
+                            val now = SystemClock.uptimeMillis()
+                            if (detents != applied && now - lastTick >= TickIntervalMs) {
+                                val direction = if (detents > applied) 1 else -1
                                 applied = detents
-                            }
-                            val notch = (accumulated / NotchDegrees).toInt()
-                            if (notch != lastNotch) {
-                                lastNotch = notch
-                                val now = SystemClock.uptimeMillis()
-                                if (now - lastTick >= TickIntervalMs) {
+                                if (step(direction)) {
                                     view.performHapticFeedback(tickEffect)
                                     lastTick = now
                                 }
@@ -146,9 +140,9 @@ fun Dial(
         ) {
             val r = size.minDimension * .48f
             drawCircle(if (enabled) Dim else Line, r, style = Stroke(1.5.dp.toPx()))
-            val notchCount = (360 / NotchDegrees).toInt()
+            val notchCount = (360 / DetentDegrees).toInt()
             for (i in 0 until notchCount) {
-                val radians = Math.toRadians((i * NotchDegrees + rotation - 90).toDouble())
+                val radians = Math.toRadians((i * DetentDegrees + rotation - 90).toDouble())
                 val direction = Offset(cos(radians).toFloat(), sin(radians).toFloat())
                 val major = i % 2 == 0
                 drawLine(

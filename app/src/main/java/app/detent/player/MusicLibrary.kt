@@ -41,6 +41,7 @@ data class Track(
                     putString("format", format)
                     putString("sourceName", source.name)
                     putString("sourcePlaylistId", source.playlistId)
+                    putString("queueId", source.queueId)
                 })
                 .build()
         )
@@ -76,18 +77,21 @@ data class Track(
     }
 }
 
-data class QueueSource(val name: String, val playlistId: String? = null) {
+data class QueueSource(val name: String, val playlistId: String? = null, val queueId: String? = null) {
+    fun newQueue(): QueueSource = copy(queueId = UUID.randomUUID().toString())
+
     companion object {
         val AllTracks = QueueSource("All tracks")
-        val Search = QueueSource("Search results")
         val Favorites = QueueSource("Favorites")
         val Demo = QueueSource("Room Tone")
         val Queue = QueueSource("Queue")
 
+        fun search(query: String): QueueSource = QueueSource("Search · ${query.trim().take(80)}")
+
         fun fromMediaItem(item: MediaItem): QueueSource? {
             val extras = item.mediaMetadata.extras
             val name = extras?.getString("sourceName") ?: return null
-            return QueueSource(name, extras.getString("sourcePlaylistId"))
+            return QueueSource(name, extras.getString("sourcePlaylistId"), extras.getString("queueId"))
         }
     }
 }
@@ -142,7 +146,7 @@ private fun String?.knownTag(): String? = this?.trim()?.takeIf {
     it.isNotEmpty() && it != MediaStore.UNKNOWN_STRING
 }
 
-fun readArtwork(context: Context, track: Track): Bitmap? = runCatching {
+fun readArtwork(context: Context, track: Track, maxSize: Int = 1200): Bitmap? = runCatching {
     val bytes = if (track.artwork != null) {
         context.contentResolver.openInputStream(track.artwork)?.use { it.readBytes() }
     } else {
@@ -157,7 +161,7 @@ fun readArtwork(context: Context, track: Track): Bitmap? = runCatching {
     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
     var sample = 1
-    while (maxOf(options.outWidth, options.outHeight) / sample > 1200) sample *= 2
+    while (maxOf(options.outWidth, options.outHeight) / sample > maxSize) sample *= 2
     options.inSampleSize = sample
     options.inJustDecodeBounds = false
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)

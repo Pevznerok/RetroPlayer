@@ -9,6 +9,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -258,7 +259,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             duration = player.duration.takeIf { it > 0 } ?: queue.getOrNull(index)?.durationMs ?: 0,
             repeat = player.repeatMode,
             canSkipNext = player.hasNextMediaItem(),
-            error = player.playerError?.let { "Couldn’t play this file" }
+            error = player.playerError?.let {
+                if (it.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED) "Audio decoder couldn’t start"
+                else "Couldn’t play this file"
+            }
         )
     }
 

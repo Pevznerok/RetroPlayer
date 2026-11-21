@@ -104,6 +104,9 @@ fun NowPlaying(player: PlayerViewModel, state: Playback, openLibrary: () -> Unit
                     )
                 }
             }
+            state.error?.let {
+                Text(it, color = Signal, fontSize = 13.sp, modifier = Modifier.fillMaxWidth())
+            }
             Spacer(Modifier.height(4.dp))
             PositionReadout(position, state.duration, preview)
             Spacer(Modifier.height(10.dp))
@@ -150,9 +153,6 @@ fun NowPlaying(player: PlayerViewModel, state: Playback, openLibrary: () -> Unit
                 Key(Glyph.Next, "Next track", enabled = state.canSkipNext, onClick = player::skipNext)
             }
             DotText("SEEK  ·  5 SEC / CLICK", Modifier.padding(top = 3.dp, bottom = 8.dp), size = 11)
-            state.error?.let {
-                Text(it, color = Signal, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
-            }
         }
     }
 }
